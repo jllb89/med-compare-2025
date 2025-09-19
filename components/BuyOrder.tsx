@@ -12,16 +12,21 @@ export default function BuyOrder({
   selected,
   data,
   compact = false,
+  onRemoveKeys,
 }: {
   selected: Map<SelectedKey, { row: CombineRow; cell: CombineCell }>;
   data: CombineResponse | null;
   compact?: boolean;
+  onRemoveKeys?: (keys: string[]) => void;
 }) {
   const [qty, setQty] = useState<Record<string, number>>({});
   const [note, setNote] = useState<Record<string, string>>({});
   const tableRef = useRef<HTMLTableElement | null>(null);
 
   const items = useMemo(() => Array.from(selected.entries()), [selected]);
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const anyChecked = items.some(([k]) => checked[k]);
+  const allChecked = items.length > 0 && items.every(([k]) => !!checked[k]);
 
   // initialize qty=1 for new lines
   useMemo(() => {
@@ -61,14 +66,11 @@ export default function BuyOrder({
     const rows = totals.lines.map(({ row, cell, q, line, note }) => ({
       SKU: row.sku,
       Product: row.productName || '',
-      Supplier: stripExt(cell.filename),
+      Supplier: cell.supplier || stripExt(cell.filename),
       Price: cell.price ?? 0,
       Qty: q,
       'Line total': line,
       Note: note || '',
-      File: stripExt(cell.filename),
-      Sheet: cell.sheetName || '',
-      Row: cell.rowIndex ?? '',
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -119,6 +121,18 @@ export default function BuyOrder({
             </div>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => {
+                  if (!onRemoveKeys) return;
+                  const keys = items.filter(([k]) => checked[k]).map(([k]) => k);
+                  if (keys.length) onRemoveKeys(keys);
+                }}
+                disabled={!anyChecked}
+                className={`rounded-md border px-2 py-1 text-xs ${anyChecked ? 'border-neutral-200 bg-white dark:border-neutral-700 dark:bg-neutral-900' : 'cursor-not-allowed border-neutral-200/60 bg-white/60 text-neutral-400 dark:border-neutral-700/60 dark:bg-neutral-900/60'}`}
+                title={anyChecked ? 'Remove selected from order' : 'Select rows to delete'}
+              >
+                Delete selected
+              </button>
+              <button
                 onClick={exportXLSX}
                 className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
               >
@@ -137,6 +151,20 @@ export default function BuyOrder({
             <table ref={tableRef} className="min-w-[1100px] w-full text-xs">
               <thead>
                 <tr className="border-b border-neutral-200 bg-neutral-100/70 dark:border-neutral-800 dark:bg-neutral-900/60">
+                  <th className={`${pad} text-left font-medium w-[28px]`}>
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-black dark:accent-white"
+                      checked={allChecked}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        const next: Record<string, boolean> = { ...checked };
+                        for (const [k] of items) next[k] = val;
+                        setChecked(next);
+                      }}
+                      aria-label="Select all rows"
+                    />
+                  </th>
                   <th className={`${pad} text-left font-medium`}>SKU</th>
                   <th className={`${pad} text-left font-medium w-[240px]`}>Product</th>
                   <th className={`${pad} text-left font-medium`}>Supplier</th>
@@ -144,21 +172,27 @@ export default function BuyOrder({
                   <th className={`${pad} text-left font-medium`}>Qty</th>
                   <th className={`${pad} text-left font-medium`}>Line total</th>
                   <th className={`${pad} text-left font-medium w-[220px]`}>Note</th>
-                  <th className={`${pad} text-left font-medium`}>File</th>
-                  <th className={`${pad} text-left font-medium`}>Sheet</th>
-                  <th className={`${pad} text-left font-medium`}>Row</th>
                 </tr>
               </thead>
               <tbody>
                 {totals.lines.map(({ k, row, cell, q, line, note: lineNote }) => (
                   <tr key={k} className="border-b border-neutral-200 last:border-0 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40">
+                    <td className={pad}>
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 accent-black dark:accent-white"
+                        checked={!!checked[k]}
+                        onChange={(e) => setChecked((s) => ({ ...s, [k]: e.target.checked }))}
+                        aria-label={`Select ${row.sku}`}
+                      />
+                    </td>
                     <td className={pad + ' font-mono'}>{row.sku}</td>
                     <td className={pad}>
                       <span className="inline-block max-w-[240px] truncate align-bottom" title={row.productName || ''}>
                         {row.productName || '—'}
                       </span>
                     </td>
-                    <td className={pad}>{stripExt(cell.filename)}</td>
+                    <td className={pad}>{cell.supplier || stripExt(cell.filename)}</td>
                     <td className={pad}>{formatMXN(cell.price)}</td>
                     <td className={pad}>
                       <input
@@ -178,9 +212,7 @@ export default function BuyOrder({
                         className="w-full rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs outline-none focus:ring dark:border-neutral-700 dark:bg-neutral-900"
                       />
                     </td>
-                    <td className={pad + ' font-mono'}>{stripExt(cell.filename)}</td>
-                    <td className={pad}>{cell.sheetName || '—'}</td>
-                    <td className={pad + ' font-mono'}>{cell.rowIndex ?? '—'}</td>
+                    {/* File/Sheet/Row columns removed for cleaner buy order */}
                   </tr>
                 ))}
               </tbody>

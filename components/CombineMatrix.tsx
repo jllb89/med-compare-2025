@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { XCircle } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { XCircle, ChevronDown, Check } from 'lucide-react';
 import type { CombineResponse, CombineRow, CombineCell } from '@/lib/types';
 import { formatMXN } from '@/lib/price';
 import { computeBand, flaggedOutlier } from '@/lib/priceGuard';
@@ -42,6 +42,59 @@ export default function CombineMatrix({
     return Array.isArray(first?.prices) ? first.prices.map((c) => c.filename) : [];
   }, [data]);
   const displayFileNames = useMemo(() => fileNames.map(stripExt), [fileNames]);
+
+  // Per-file price column override: filename -> header or null for auto
+  const [priceOverrides, setPriceOverrides] = useState<Record<string, string | null>>({});
+  const [openMenu, setOpenMenu] = useState<number | null>(null); // index of open header menu
+  const menuAnchorRef = useRef<HTMLElement | null>(null);
+
+  // Close dropdown when clicking outside of the current open header/menu
+  useEffect(() => {
+    if (openMenu == null) return;
+    const onDocPointerDown = (e: PointerEvent) => {
+      const anchor = menuAnchorRef.current;
+      const target = e.target as Node | null;
+      if (!anchor || !target) return;
+      if (!anchor.contains(target)) setOpenMenu(null);
+    };
+    document.addEventListener('pointerdown', onDocPointerDown, { capture: true });
+    return () => document.removeEventListener('pointerdown', onDocPointerDown, true);
+  }, [openMenu]);
+
+  // Close on Escape regardless of focus target when a menu is open
+  useEffect(() => {
+    if (openMenu == null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [openMenu]);
+
+  // Build helper maps for quick access
+  const filesByName = useMemo(() => {
+    const map = new Map<string, number[]>();
+    (data?.files || []).forEach((fr, idx) => {
+      const arr = map.get(fr.filename) || [];
+      arr.push(idx);
+      map.set(fr.filename, arr);
+    });
+    return map;
+  }, [data]);
+
+  // Collect candidate headers per uploaded filename (across its sheets)
+  const headerOptionsByFile = useMemo(() => {
+    const m = new Map<string, string[]>();
+    filesByName.forEach((idxs, fname) => {
+      const set = new Set<string>();
+      idxs.forEach((i) => {
+        const fr = data!.files[i];
+        fr.matches.forEach(mt => {
+          Object.keys(mt.priceCandidates || {}).forEach(h => set.add(h));
+        });
+      });
+      m.set(fname, Array.from(set).sort());
+    });
+    return m;
+  }, [data, filesByName]);
 
   // Show all rows that appeared in uploads (even if all prices are null)
   // Search matches product name OR SKU
@@ -136,28 +189,107 @@ export default function CombineMatrix({
               <th className={`${cellPad} text-left font-medium w-[240px]`}>Product</th>
               <th className={`${cellPad} text-left font-medium w-[200px]`}>Formula</th>
               <th className={`${cellPad} text-left font-medium w-[150px]`}>Lab</th>
-              {displayFileNames.map((fn, idx) => (
-                <th key={`${fn}-${idx}`} className={`${cellPad} text-left font-medium ${wFileCol}`}>
-                  <span
-                    className="block overflow-hidden whitespace-nowrap pr-2"
-                    title={fn}
-                    style={{
-                      WebkitMaskImage: 'linear-gradient(to right, black, black calc(100% - 16px), transparent)',
-                      maskImage: 'linear-gradient(to right, black, black calc(100% - 16px), transparent)'
-                    }}
+              {displayFileNames.map((fnBase, colIdx) => {
+                const fullName = fileNames[colIdx];
+                const current = priceOverrides[fullName] ?? null;
+                const opts = headerOptionsByFile.get(fullName) || [];
+                return (
+                  <th
+                    key={`${fnBase}-${colIdx}`}
+                    className={`${cellPad} text-left font-medium ${wFileCol} relative`}
+                    ref={openMenu === colIdx ? (el) => { menuAnchorRef.current = el as unknown as HTMLElement; } : null}
                   >
-                    {fn}
-                  </span>
-                </th>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => setOpenMenu(openMenu === colIdx ? null : colIdx)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setOpenMenu(null); }}
+                      className="group inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-neutral-200/60 dark:hover:bg-neutral-800/50"
+                      title={`Select price column for ${fullName}`}
+                    >
+                      <span
+                        className="block overflow-hidden whitespace-nowrap pr-1"
+                        style={{ WebkitMaskImage: 'linear-gradient(to right, black, black calc(100% - 14px), transparent)', maskImage: 'linear-gradient(to right, black, black calc(100% - 14px), transparent)' }}
+                      >
+                        {fnBase}
+                      </span>
+                      <ChevronDown size={14} className="shrink-0 text-neutral-500 group-hover:text-neutral-700 dark:text-neutral-400 dark:group-hover:text-neutral-200" />
+                    </button>
+
+                    {openMenu === colIdx && (
+                      <div className="absolute right-1 top-full z-20 mt-1 w-[220px] overflow-hidden rounded-md border border-neutral-200 bg-white p-1 text-xs shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                        <button
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                          onClick={() => { setPriceOverrides(prev => ({ ...prev, [fullName]: null })); setOpenMenu(null); }}
+                        >
+                          <span className="inline-flex h-4 w-4 items-center justify-center">
+                            {current === null ? <Check size={14} /> : null}
+                          </span>
+                          Auto (best)
+                        </button>
+                        <div className="my-1 h-px bg-neutral-200 dark:bg-neutral-800" />
+                        <div className="max-h-56 overflow-auto">
+                          {opts.length === 0 ? (
+                            <div className="px-2 py-1.5 text-neutral-500">No headers detected</div>
+                          ) : (
+                            opts.map(h => (
+                              <button
+                                key={h}
+                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                                onClick={() => { setPriceOverrides(prev => ({ ...prev, [fullName]: h })); setOpenMenu(null); }}
+                                title={h}
+                              >
+                                <span className="inline-flex h-4 w-4 items-center justify-center">{current === h ? <Check size={14} /> : null}</span>
+                                <span className="block max-w-[160px] overflow-hidden whitespace-nowrap" style={{ WebkitMaskImage: 'linear-gradient(to right, black, black calc(100% - 12px), transparent)', maskImage: 'linear-gradient(to right, black, black calc(100% - 12px), transparent)' }}>{h}</span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
 
           <tbody>
             {rows.map((r, ridx) => {
-              const bestIdx = r.bestIndex;
+              // Build display cells per file, applying overrides if any
+              const displayCells = r.prices.map((cell, i) => {
+                const fileName = fileNames[i];
+                const override = priceOverrides[fileName] ?? null;
+                if (!override) return cell;
+                // Compute best price across sheets for this SKU using the override header
+                const idxs = filesByName.get(fileName) || [];
+                let best: CombineCell | null = null;
+                idxs.forEach(fileIdx => {
+                  const fr = data!.files[fileIdx];
+                  fr.matches.forEach((m, mIdx) => {
+                    if (m.skuDetected !== r.sku) return;
+                    const v = m.priceCandidates?.[override] ?? null;
+                    if (v != null) {
+                      const c: CombineCell = {
+                        filename: fileName,
+                        sheetName: fr.sheetName,
+                        supplier: normalizeSupplier(m.supplier) ?? m.supplier ?? undefined,
+                        price: v,
+                        priceColumnUsed: override,
+                        rowIndex: m.rowIndex,
+                        ref: { fileIdx, matchIdx: mIdx },
+                      };
+                      if (!best || (c.price != null && c.price < (best.price ?? Infinity))) best = c;
+                    }
+                  });
+                });
+                return best ?? cell;
+              });
+
+              // Determine best index among display cells
+              let bestIdx: number | undefined = undefined;
+              let bestPrice = Number.POSITIVE_INFINITY;
+              displayCells.forEach((c, i) => { if (c.price != null && c.price < bestPrice) { bestPrice = c.price; bestIdx = i; } });
               const band = (r as any)._band;
-              const hasAnyPrice = r.prices?.some((c) => c.price != null);
+              const hasAnyPrice = displayCells.some((c) => c.price != null);
               const bandPct = band.pct > 0 ? Math.round(band.pct * 100) : 0;
 
               return (
@@ -223,7 +355,7 @@ export default function CombineMatrix({
                   </td>
 
                   {/* Prices */}
-                  {r.prices.map((c, i) => {
+                  {displayCells.map((c, i) => {
                     const k = keyOf(r.sku, c.filename);
                     const isBest = bestIdx != null && i === bestIdx && c.price != null;
                     const isSel = selectedKeys.has(k);

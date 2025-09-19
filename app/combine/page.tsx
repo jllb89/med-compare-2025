@@ -233,7 +233,24 @@ export default function CombinePage() {
               </div>
             </div>
             <div className="flex-1 min-h-0">
-              <BuyOrder selected={selected} data={data} compact={compact} />
+              <BuyOrder
+                selected={selected}
+                data={data}
+                compact={compact}
+                onRemoveKeys={(keys) => {
+                  setSelected(prev => {
+                    const next = new Map(prev);
+                    keys.forEach(k => next.delete(k));
+                    return next;
+                  });
+                  if (lastPick && keys.includes(keyOf(lastPick.row.sku, lastPick.cell.filename))) {
+                    setLastPick(null);
+                  }
+                  // also update persisted selection
+                  const remaining = Array.from(selected.keys()).filter(k => !keys.includes(k));
+                  localStorage.setItem('combine.sel.keys', JSON.stringify(remaining));
+                }}
+              />
             </div>
           </div>
         </section>
