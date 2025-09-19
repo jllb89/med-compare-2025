@@ -87,6 +87,8 @@ function parseSingleSheetAll(
 
     matches.push({
       rowIndex: headerRowIdx + 1 + i,
+      filename,
+      sheetName,
       supplier,
       priceSelected: chosen.value,
       priceColumnUsed: chosen.col,
@@ -105,6 +107,9 @@ function parseSingleSheetAll(
     mapping: {
       skuCols: skuColsIdx.map((i: number) => headers[i] ?? `col_${i}`),
       priceCols: priceColsIdx.map((i: number) => headers[i] ?? `col_${i}`),
+      // not chosen at parse stage; combine route may enforce consensus later
+      priceColumnIndex: null,
+      priceColumnReason: 'none',
       supplierCols: mapping0.supplierCols.map((i: number) => headers[i] ?? `col_${i}`),
       productNameCols: nameCols.map((i: number) => headers[i] ?? `col_${i}`),
       formulaCols: formulaCols.map((i: number) => headers[i] ?? `col_${i}`),

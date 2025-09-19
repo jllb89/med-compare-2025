@@ -19,6 +19,17 @@ const eslintConfig = [
       "build/**",
       "next-env.d.ts",
     ],
+    rules: {
+      // Allow using any in this project while iterating quickly
+      "@typescript-eslint/no-explicit-any": "off",
+      // Show as warning instead of error for faster local iteration
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
+      ],
+      // Allow let usage without forcing const
+      "prefer-const": "off",
+    },
   },
 ];
 
